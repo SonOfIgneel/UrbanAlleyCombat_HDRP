@@ -9,6 +9,7 @@ public class PlayerWeapon : MonoBehaviour
     [SerializeField] private Transform muzzlePoint;
     [SerializeField] private InputActionReference fireAction;
     [SerializeField] private ParticleSystem muzzleFlash;
+    [SerializeField] private BulletProjectile projectilePrefab;
     [SerializeField] private GameObject environmentImpactPrefab;
     [SerializeField] private GameObject enemyImpactPrefab;
 
@@ -18,9 +19,16 @@ public class PlayerWeapon : MonoBehaviour
     [SerializeField] private float fireInterval = 0.15f;
     [SerializeField] private LayerMask hitMask = ~0;
 
+    [Header("Animation Synchronization")]
+    [SerializeField, Range(0f, 1f)]
+    private float fireReleaseNormalizedTime = 4f / 35f;
+
     private static readonly int FireParameter = Animator.StringToHash("Fire");
+    private static readonly int FireState = Animator.StringToHash("Fire");
 
     private float nextFireTime;
+    private bool fireRequested;
+    private bool waitingForFireRestart;
 
     private void OnEnable()
     {
@@ -32,50 +40,106 @@ public class PlayerWeapon : MonoBehaviour
     {
         if (fireAction != null)
             fireAction.action.Disable();
+
+        fireRequested = false;
     }
 
     private void Update()
     {
-        if (fireAction == null || !fireAction.action.IsPressed())
-            return;
+        ReleasePendingShotAtAnimationMoment();
 
-        TryFire();
+        if (fireAction != null && fireAction.action.IsPressed())
+            TryBeginFire();
     }
 
-    private void TryFire()
+    private void TryBeginFire()
     {
-        if (Time.time < nextFireTime || playerCamera == null)
+        if (fireRequested || Time.time < nextFireTime || playerCamera == null ||
+            playerAnimator == null ||
+            muzzlePoint == null || projectilePrefab == null)
             return;
 
         nextFireTime = Time.time + fireInterval;
+        fireRequested = true;
+        waitingForFireRestart =
+            playerAnimator.GetCurrentAnimatorStateInfo(0).shortNameHash == FireState;
 
-        if (playerAnimator != null)
-            playerAnimator.SetTrigger(FireParameter);
+        playerAnimator.SetTrigger(FireParameter);
+    }
 
+    private void ReleasePendingShotAtAnimationMoment()
+    {
+        if (!fireRequested || playerAnimator == null)
+            return;
+
+        AnimatorStateInfo fireState = playerAnimator.GetCurrentAnimatorStateInfo(0);
+        bool transitioningIntoFire = false;
+
+        if (playerAnimator.IsInTransition(0))
+        {
+            AnimatorStateInfo nextState = playerAnimator.GetNextAnimatorStateInfo(0);
+
+            if (nextState.shortNameHash == FireState)
+            {
+                fireState = nextState;
+                transitioningIntoFire = true;
+            }
+        }
+
+        if (fireState.shortNameHash != FireState)
+            return;
+
+        if (waitingForFireRestart)
+        {
+            if (!transitioningIntoFire &&
+                fireState.normalizedTime >= fireReleaseNormalizedTime)
+                return;
+
+            waitingForFireRestart = false;
+        }
+
+        if (fireState.normalizedTime < fireReleaseNormalizedTime)
+            return;
+
+        fireRequested = false;
+        FireProjectile();
+    }
+
+    private void FireProjectile()
+    {
         if (muzzleFlash != null)
             muzzleFlash.Play(true);
 
-        Ray ray = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-        if (!Physics.Raycast(ray, out RaycastHit hit, range, hitMask, QueryTriggerInteraction.Ignore))
-            return;
+        Vector3 aimPoint = GetAimPoint();
+        Vector3 direction = (aimPoint - muzzlePoint.position).normalized;
+        Quaternion rotation = Quaternion.LookRotation(direction);
 
-        EnemyHealth enemyHealth = hit.collider.GetComponentInParent<EnemyHealth>();
-        if (enemyHealth != null)
-        {
-            enemyHealth.TakeDamage(damage);
-            SpawnImpact(enemyImpactPrefab, hit);
-            return;
-        }
+        BulletProjectile projectile = Instantiate(
+            projectilePrefab,
+            muzzlePoint.position,
+            rotation);
 
-        SpawnImpact(environmentImpactPrefab, hit);
+        projectile.Initialize(
+            damage,
+            gameObject,
+            environmentImpactPrefab,
+            enemyImpactPrefab);
     }
 
-    private static void SpawnImpact(GameObject prefab, RaycastHit hit)
+    private Vector3 GetAimPoint()
     {
-        if (prefab == null)
-            return;
+        Ray aimRay = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
 
-        Quaternion rotation = Quaternion.LookRotation(hit.normal);
-        Instantiate(prefab, hit.point + hit.normal * 0.01f, rotation);
+        if (Physics.Raycast(
+                aimRay,
+                out RaycastHit hit,
+                range,
+                hitMask,
+                QueryTriggerInteraction.Ignore))
+        {
+            return hit.point;
+        }
+
+        return aimRay.origin + aimRay.direction * range;
     }
 }

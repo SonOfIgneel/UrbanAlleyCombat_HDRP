@@ -15,6 +15,8 @@ public class EnemyAI : MonoBehaviour
     [Header("References")]
     [SerializeField] private Transform firePoint;
     [SerializeField] private Animator animator;
+    [SerializeField] private BulletProjectile projectilePrefab;
+    [SerializeField] private ParticleSystem muzzleFlash;
 
     [Header("Detection")]
     [SerializeField] private float detectionRadius = 22f;
@@ -34,7 +36,6 @@ public class EnemyAI : MonoBehaviour
 
     private NavMeshAgent agent;
     private Transform player;
-    private PlayerHealth playerHealth;
     private Vector3 lastKnownPosition;
     private float nextFireTime;
     private bool alerted;
@@ -118,7 +119,6 @@ public class EnemyAI : MonoBehaviour
             return;
 
         player = playerController.transform;
-        playerHealth = playerController.GetComponent<PlayerHealth>();
     }
 
     private bool CanSeePlayer(float range)
@@ -172,7 +172,7 @@ public class EnemyAI : MonoBehaviour
         if (animator != null)
             animator.SetTrigger(FireParameter);
 
-        FireRaycast();
+        FireProjectile();
     }
 
     private void FacePlayer()
@@ -187,21 +187,27 @@ public class EnemyAI : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, turnSpeed * Time.deltaTime);
     }
 
-    private void FireRaycast()
+    private void FireProjectile()
     {
-        if (firePoint == null || player == null)
+        if (firePoint == null || player == null || projectilePrefab == null)
             return;
 
         Vector3 target = player.position + Vector3.up;
         Vector3 direction = target - firePoint.position;
+        Quaternion shotRotation = Quaternion.LookRotation(direction);
 
-        if (!Physics.Raycast(firePoint.position, direction.normalized, out RaycastHit hit,
-                attackRange, lineOfSightMask, QueryTriggerInteraction.Ignore))
-            return;
+        if (muzzleFlash != null)
+        {
+            muzzleFlash.transform.rotation = shotRotation;
+            muzzleFlash.Play(true);
+        }
 
-        PlayerHealth health = hit.transform.GetComponentInParent<PlayerHealth>();
-        if (health != null)
-            health.TakeDamage(damage);
+        BulletProjectile projectile = Instantiate(
+            projectilePrefab,
+            firePoint.position,
+            shotRotation);
+
+        projectile.Initialize(damage, gameObject);
     }
 
     private void SetState(EnemyState newState)

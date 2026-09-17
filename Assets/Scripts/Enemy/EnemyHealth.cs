@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
@@ -15,7 +16,9 @@ public class EnemyHealth : MonoBehaviour
     private static readonly int IsDeadParameter = Animator.StringToHash("IsDead");
 
     public float CurrentHealth { get; private set; }
+    public float MaxHealth => maxHealth;
     public bool IsDead { get; private set; }
+    public event Action<float, float> HealthChanged;
 
     private void Awake()
     {
@@ -33,11 +36,14 @@ public class EnemyHealth : MonoBehaviour
         if (CurrentHealth <= 0f)
         {
             Die();
+            HealthChanged?.Invoke(CurrentHealth, maxHealth);
             return;
         }
 
         if (animator != null)
             animator.SetTrigger(HitParameter);
+
+        HealthChanged?.Invoke(CurrentHealth, maxHealth);
     }
 
     private void Die()
